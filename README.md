@@ -17,6 +17,24 @@
 
 Just launch `waypin` with no arguments — it reads the clipboard once, shows a preview window, and exits when you close it.
 
+### Hyprland preview windows
+
+On Hyprland, previews use ordinary windows even when built with `pin-on-top`.
+This preserves the title bar, close button, resizing, and compositor window
+controls. Layer-shell surfaces bypass window rules and can collapse to the
+minimum widget size, so they are unsuitable for these interactive previews.
+Add a floating/pinned rule to `hyprland.lua` to keep previews visible:
+
+```lua
+hl.window_rule({
+    name = "waypin-preview",
+    match = { class = "^waypin$" },
+    float = true,
+    center = true,
+    pin = true,
+})
+```
+
 ## Background mode (Hyprland global shortcut)
 
 Build with the `global-shortcuts` feature to enable the background daemon:
