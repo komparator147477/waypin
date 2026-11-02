@@ -12,8 +12,9 @@ use waypin_lib::{
 #[cfg(feature = "global-shortcuts")]
 mod shortcut;
 
-/// Promote a preview window to the wlr-layer-shell `top` layer so it stays
-/// always-on-top on wlroots / KDE / COSMIC / Weston / niri / etc.
+/// Promote a preview window to the wlr-layer-shell `top` layer where appropriate.
+/// Hyprland uses ordinary toplevels and compositor window rules instead: layer
+/// surfaces cannot be moved, resized, or closed through its window controls.
 ///
 /// Silently no-ops on compositors that don't implement `zwlr_layer_shell_v1`
 /// (GNOME Mutter, Cinnamon Muffin, Cage) and under X11. In those cases the
@@ -26,6 +27,10 @@ mod shortcut;
 #[cfg(feature = "pin-on-top")]
 fn try_promote_to_layer_top(window: &ApplicationWindow, w: i32, h: i32) {
     use gtk_layer_shell::{Edge, KeyboardMode, Layer, LayerShell};
+
+    if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_some() {
+        return;
+    }
 
     if !gtk_layer_shell::is_supported() {
         return;
@@ -49,7 +54,8 @@ fn try_promote_to_layer_top(window: &ApplicationWindow, w: i32, h: i32) {
 }
 
 #[cfg(not(feature = "pin-on-top"))]
-fn try_promote_to_layer_top(_: &ApplicationWindow, _: i32, _: i32) { /* no-op */ }
+fn try_promote_to_layer_top(_: &ApplicationWindow, _: i32, _: i32) { /* no-op */
+}
 
 #[derive(Clone)]
 enum ClipboardContent {
