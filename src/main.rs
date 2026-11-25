@@ -134,7 +134,7 @@ fn build_text_window(app: &Application, text: &str) -> ApplicationWindow {
     window.set_type_hint(gtk::gdk::WindowTypeHint::Dialog);
     window.set_keep_above(true);
     window.set_modal(true);
-    make_translucent(&window);
+    prepare_window(&window);
 
     let vbox = Box::new(Orientation::Vertical, 10);
     vbox.set_margin_top(16);
@@ -177,22 +177,8 @@ fn build_text_window(app: &Application, text: &str) -> ApplicationWindow {
     window
 }
 
-/// Translucent previews: the window shows the theme background at 70%
-/// (the compositor may blur what's behind it), the widgets on top are clear.
-/// Override in `$XDG_CONFIG_HOME/waypin/style.css`.
-const TRANSLUCENT_CSS: &str = "
-window.waypin-translucent {
-    background-color: alpha(@theme_bg_color, 0.7);
-}
-window.waypin-translucent scrolledwindow,
-window.waypin-translucent viewport,
-window.waypin-translucent textview,
-window.waypin-translucent textview text {
-    background-color: transparent;
-}
-";
-
-/// `$XDG_CONFIG_HOME/waypin/style.css`, loaded after the built-in style.
+/// `$XDG_CONFIG_HOME/waypin/style.css`: optional user styling for preview
+/// windows, e.g. a translucent background (see README).
 fn user_style_path() -> Option<std::path::PathBuf> {
     std::env::var_os("XDG_CONFIG_HOME")
         .map(std::path::PathBuf::from)
@@ -200,21 +186,13 @@ fn user_style_path() -> Option<std::path::PathBuf> {
         .map(|config| config.join("waypin/style.css"))
 }
 
-/// Install the built-in and user stylesheets once per process.
-fn load_styles(screen: &gtk::gdk::Screen) {
+/// Load the user stylesheet once per process.
+fn load_user_style(screen: &gtk::gdk::Screen) {
     thread_local! {
         static LOADED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
     }
     if LOADED.with(|loaded| loaded.replace(true)) {
         return;
-    }
-    let provider = gtk::CssProvider::new();
-    if provider.load_from_data(TRANSLUCENT_CSS.as_bytes()).is_ok() {
-        gtk::StyleContext::add_provider_for_screen(
-            screen,
-            &provider,
-            gtk::STYLE_PROVIDER_PRIORITY_APPLICATION,
-        );
     }
     let Some(path) = user_style_path().filter(|p| p.exists()) else {
         return;
@@ -230,19 +208,18 @@ fn load_styles(screen: &gtk::gdk::Screen) {
     }
 }
 
-/// Give the window an RGBA visual and a translucent background. Without a
-/// compositor (no RGBA visual) the window keeps the opaque theme background.
-fn make_translucent(window: &ApplicationWindow) {
+/// Tag the window for user styling and give it an RGBA visual, so a
+/// translucent background in style.css works. Without a user style the
+/// theme's opaque background is drawn as usual.
+fn prepare_window(window: &ApplicationWindow) {
+    window.style_context().add_class("waypin-preview");
     let Some(screen) = GtkWindowExt::screen(window) else {
         return;
     };
-    let Some(visual) = screen.rgba_visual() else {
-        return;
-    };
-    window.set_visual(Some(&visual));
-    window.set_app_paintable(true);
-    load_styles(&screen);
-    window.style_context().add_class("waypin-translucent");
+    if let Some(visual) = screen.rgba_visual() {
+        window.set_visual(Some(&visual));
+    }
+    load_user_style(&screen);
 }
 
 /// Largest default window size that fits on every monitor.
@@ -283,7 +260,7 @@ fn build_image_window(app: &Application, img_data: &[u8], mime_type: &str) {
         eprintln!("Failed to decode image data.");
         return;
     };
-    make_translucent(&window);
+    prepare_window(&window);
 
     let image = Image::new();
     image.set_hexpand(true);
