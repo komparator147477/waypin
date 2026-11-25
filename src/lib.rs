@@ -196,6 +196,25 @@ pub fn compute_scaled_dimensions(
     (new_w.max(0), new_h.max(0))
 }
 
+/// Default size of an image preview window: the image fit inside
+/// `max_w`×`max_h` keeping its aspect ratio. Small images are enlarged so
+/// their longer side is at least `min_long` (still within the maximum), so a
+/// tiny screenshot crop doesn't open as a postage stamp.
+pub fn default_preview_size(
+    orig_w: i32,
+    orig_h: i32,
+    max_w: i32,
+    max_h: i32,
+    min_long: i32,
+) -> (i32, i32) {
+    let fit = compute_scaled_dimensions(orig_w, orig_h, max_w, max_h, false);
+    if fit.0.max(fit.1) >= min_long {
+        return fit;
+    }
+    let target = compute_scaled_dimensions(orig_w, orig_h, min_long, min_long, true);
+    compute_scaled_dimensions(target.0, target.1, max_w, max_h, false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

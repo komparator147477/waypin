@@ -1,3 +1,4 @@
+use gtk::gdk::prelude::GdkPixbufExt;
 use gtk::gdk_pixbuf::PixbufLoader;
 use gtk::prelude::*;
 use gtk::Adjustment;
@@ -154,6 +155,7 @@ fn build_text_window(app: &Application, text: &str) -> ApplicationWindow {
     window.set_type_hint(gtk::gdk::WindowTypeHint::Dialog);
     window.set_keep_above(true);
     window.set_modal(true);
+    prepare_window(&window);
 
     let vbox = Box::new(Orientation::Vertical, 10);
     vbox.set_margin_top(16);
@@ -196,6 +198,71 @@ fn build_text_window(app: &Application, text: &str) -> ApplicationWindow {
     window
 }
 
+/// `$XDG_CONFIG_HOME/waypin/style.css`: optional user styling for preview
+/// windows, e.g. a translucent background (see README).
+fn user_style_path() -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_CONFIG_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
+        .map(|config| config.join("waypin/style.css"))
+}
+
+/// Load the user stylesheet once per process.
+fn load_user_style(screen: &gtk::gdk::Screen) {
+    thread_local! {
+        static LOADED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    }
+    if LOADED.with(|loaded| loaded.replace(true)) {
+        return;
+    }
+    let Some(path) = user_style_path().filter(|p| p.exists()) else {
+        return;
+    };
+    let provider = gtk::CssProvider::new();
+    match provider.load_from_path(&path.to_string_lossy()) {
+        Ok(()) => gtk::StyleContext::add_provider_for_screen(
+            screen,
+            &provider,
+            gtk::STYLE_PROVIDER_PRIORITY_USER,
+        ),
+        Err(error) => eprintln!("waypin: {}: {error}", path.display()),
+    }
+}
+
+/// Tag the window for user styling and give it an RGBA visual, so a
+/// translucent background in style.css works. Without a user style the
+/// theme's opaque background is drawn as usual.
+fn prepare_window(window: &ApplicationWindow) {
+    window.style_context().add_class("waypin-preview");
+    let Some(screen) = GtkWindowExt::screen(window) else {
+        return;
+    };
+    if let Some(visual) = screen.rgba_visual() {
+        window.set_visual(Some(&visual));
+    }
+    load_user_style(&screen);
+}
+
+/// Small images open enlarged to at least this long side.
+const MIN_PREVIEW_LONG_SIDE: i32 = 400;
+
+/// Largest default window size that fits on every monitor.
+fn max_window_size() -> (i32, i32) {
+    const FALLBACK: (i32, i32) = (1600, 1000);
+    let Some(display) = gtk::gdk::Display::default() else {
+        return FALLBACK;
+    };
+    let mut size: Option<(i32, i32)> = None;
+    for i in 0..display.n_monitors() {
+        if let Some(monitor) = display.monitor(i) {
+            let area = monitor.workarea();
+            let (w, h) = (area.width() * 85 / 100, area.height() * 85 / 100);
+            size = Some(size.map_or((w, h), |(sw, sh)| (sw.min(w), sh.min(h))));
+        }
+    }
+    size.filter(|&(w, h)| w > 0 && h > 0).unwrap_or(FALLBACK)
+}
+
 fn build_image_window(app: &Application, img_data: &[u8], mime_type: &str) {
     let window = ApplicationWindow::new(app);
     window.set_title("Clipboard Image");
@@ -213,84 +280,95 @@ fn build_image_window(app: &Application, img_data: &[u8], mime_type: &str) {
         eprintln!("Failed to finalize image loading.");
         return;
     }
-    if let Some(orig_pixbuf) = loader.pixbuf() {
-        let vbox = Box::new(Orientation::Vertical, 0);
-
-        let image = Image::new();
-        image.set_hexpand(true);
-        image.set_vexpand(true);
-
-        let scrolled = ScrolledWindow::new(None::<&Adjustment>, None::<&Adjustment>);
-        scrolled.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
-        scrolled.set_margin_top(0);
-        scrolled.set_margin_bottom(0);
-        scrolled.set_margin_start(0);
-        scrolled.set_margin_end(0);
-        scrolled.add(&image);
-        vbox.pack_start(&scrolled, true, true, 0);
-
-        let copy_btn = Button::with_label("Copy to Clipboard");
-        copy_btn.set_margin_top(10);
-        copy_btn.set_margin_bottom(10);
-        copy_btn.set_margin_start(10);
-        copy_btn.set_margin_end(10);
-        copy_btn.set_halign(gtk::Align::End);
-
-        let img_data_clone = img_data.to_vec();
-        let mime_type_clone = mime_type.to_string();
-        copy_btn.connect_clicked(move |_| {
-            if let Err(error) = copy_image_to_clipboard(&mime_type_clone, &img_data_clone) {
-                eprintln!("Failed to copy image to clipboard: {error}");
-            }
-        });
-        vbox.pack_start(&copy_btn, false, false, 0);
-
-        window.add(&vbox);
-
-        let orig_width = orig_pixbuf.width();
-        let orig_height = orig_pixbuf.height();
-        let button_height = 55;
-        let max_default_dim = 1600;
-        let default_w = orig_width.min(max_default_dim);
-        let default_h = (orig_height + button_height).min(max_default_dim);
-        scrolled.set_min_content_width(1);
-        scrolled.set_min_content_height(1);
-        window.set_default_size(default_w, default_h);
-        window.set_size_request(100, 100);
-
-        let orig_pixbuf_for_closure = orig_pixbuf.clone();
-        let image_clone = image.clone();
-        scrolled.connect_size_allocate(move |_, alloc| {
-            let w = alloc.width();
-            let h = alloc.height();
-            if w > 0 && h > 0 {
-                let (new_w, new_h) = waypin_lib::compute_scaled_dimensions(
-                    orig_pixbuf_for_closure.width(),
-                    orig_pixbuf_for_closure.height(),
-                    w,
-                    h,
-                    true,
-                );
-                if new_w > 0 && new_h > 0 {
-                    if let Some(scaled) = orig_pixbuf_for_closure.scale_simple(
-                        new_w,
-                        new_h,
-                        gtk::gdk_pixbuf::InterpType::Bilinear,
-                    ) {
-                        image_clone.set_from_pixbuf(Some(&scaled));
-                    }
-                }
-            }
-        });
-
-        image.set_from_pixbuf(Some(&orig_pixbuf));
-
-        try_promote_to_layer_top(&window, default_w, default_h);
-        window.show_all();
-        window.present();
-    } else {
+    let Some(orig_pixbuf) = loader.pixbuf() else {
         eprintln!("Failed to decode image data.");
-    }
+        return;
+    };
+    prepare_window(&window);
+
+    let image = Image::new();
+    image.set_hexpand(true);
+    image.set_vexpand(true);
+
+    let scrolled = ScrolledWindow::new(None::<&Adjustment>, None::<&Adjustment>);
+    // The image is always scaled to fit, so scrollbars would only flicker.
+    scrolled.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+    scrolled.set_min_content_width(1);
+    scrolled.set_min_content_height(1);
+    scrolled.add(&image);
+
+    // The button floats over the image's corner instead of taking a strip of
+    // its own, so the window can match the image exactly.
+    let copy_btn = Button::with_label("Copy to Clipboard");
+    copy_btn.set_halign(gtk::Align::End);
+    copy_btn.set_valign(gtk::Align::End);
+    copy_btn.set_margin_bottom(10);
+    copy_btn.set_margin_end(10);
+    let img_data_clone = img_data.to_vec();
+    let mime_type_clone = mime_type.to_string();
+    copy_btn.connect_clicked(move |_| {
+        if let Err(error) = copy_image_to_clipboard(&mime_type_clone, &img_data_clone) {
+            eprintln!("Failed to copy image to clipboard: {error}");
+        }
+    });
+
+    let overlay = gtk::Overlay::new();
+    overlay.add(&scrolled);
+    overlay.add_overlay(&copy_btn);
+    window.add(&overlay);
+
+    // Fit the image on screen keeping its aspect ratio; small images are
+    // enlarged to a readable size.
+    let (max_w, max_h) = max_window_size();
+    let (default_w, default_h) = waypin_lib::default_preview_size(
+        orig_pixbuf.width(),
+        orig_pixbuf.height(),
+        max_w,
+        max_h,
+        MIN_PREVIEW_LONG_SIDE,
+    );
+    window.set_default_size(default_w.max(100), default_h.max(100));
+    window.set_size_request(100, 100);
+
+    let pixbuf = orig_pixbuf.clone();
+    let image_clone = image.clone();
+    let window_clone = window.clone();
+    let last_size = std::cell::Cell::new((0, 0, 0));
+    scrolled.connect_size_allocate(move |_, alloc| {
+        let (w, h) = (alloc.width(), alloc.height());
+        // Render at the window's scale factor (2 on HiDPI and fractional
+        // scaling); a 1× pixbuf would be upscaled and blurry.
+        let scale = window_clone.scale_factor().max(1);
+        if w <= 0 || h <= 0 || last_size.get() == (w, h, scale) {
+            return;
+        }
+        last_size.set((w, h, scale));
+        // Fill the window in logical pixels, then draw that many device pixels.
+        let (new_w, new_h) =
+            waypin_lib::compute_scaled_dimensions(pixbuf.width(), pixbuf.height(), w, h, true);
+        if new_w <= 0 || new_h <= 0 {
+            return;
+        }
+        let Some(scaled) = pixbuf.scale_simple(
+            new_w * scale,
+            new_h * scale,
+            gtk::gdk_pixbuf::InterpType::Bilinear,
+        ) else {
+            return;
+        };
+        let gdk_window = window_clone.window();
+        match scaled.create_surface(scale, gdk_window.as_ref()) {
+            Some(surface) => image_clone.set_from_surface(Some(&surface)),
+            None => image_clone.set_from_pixbuf(Some(&scaled)),
+        }
+    });
+
+    try_promote_to_layer_top(&window, default_w, default_h);
+    window.show_all();
+    // Don't start with the floating button focused: its focus ring would sit
+    // on top of the image.
+    window.set_focus(None::<&gtk::Widget>);
+    window.present();
 }
 
 /// One-shot mode: stop the application once the last preview window closes.
