@@ -17,6 +17,9 @@
 
 Just launch `waypin` with no arguments — it reads the clipboard once, shows a preview window, and exits when you close it.
 
+On Wayland, waypin uses `wl-paste`/`wl-copy` from wl-clipboard. In an X11 session
+(`DISPLAY` set, no `WAYLAND_DISPLAY`) it uses `xclip` instead, so install `xclip` there.
+
 ### Hyprland preview windows
 
 On Hyprland, previews use ordinary windows even when built with `pin-on-top`.
