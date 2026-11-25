@@ -35,6 +35,20 @@ hl.window_rule({
 })
 ```
 
+### Look
+
+Image previews open at the image's aspect ratio (fit to the screen, never
+upscaled) with the copy button floating in the corner, and are drawn at the
+display's scale, so screenshots stay sharp on HiDPI and fractional scaling.
+
+Preview windows are translucent: the theme background at 70%, which the
+compositor can blur. Override it in `~/.config/waypin/style.css`
+(`$XDG_CONFIG_HOME/waypin/style.css`), for example:
+
+```css
+window.waypin-translucent { background-color: rgba(18, 22, 36, 0.70); }
+```
+
 ## Background mode (Hyprland global shortcut)
 
 Build with the `global-shortcuts` feature to enable the background daemon:
