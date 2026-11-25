@@ -220,6 +220,30 @@ mod tests {
     use super::*;
 
     #[test]
+    fn default_preview_size_keeps_normal_images() {
+        assert_eq!(
+            default_preview_size(1100, 400, 1600, 1000, 400),
+            (1100, 400)
+        );
+        assert_eq!(
+            default_preview_size(3200, 1000, 1600, 1000, 400),
+            (1600, 500)
+        );
+    }
+
+    #[test]
+    fn default_preview_size_enlarges_small_images() {
+        assert_eq!(default_preview_size(120, 40, 1600, 1000, 400), (400, 133));
+        assert_eq!(default_preview_size(30, 60, 1600, 1000, 400), (200, 400));
+    }
+
+    #[test]
+    fn default_preview_size_respects_the_maximum() {
+        assert_eq!(default_preview_size(100, 100, 300, 300, 400), (300, 300));
+        assert_eq!(default_preview_size(0, 10, 1600, 1000, 400), (0, 0));
+    }
+
+    #[test]
     fn backend_prefers_wayland_and_falls_back_to_x11() {
         assert_eq!(
             ClipboardBackend::from_env(true, true),
