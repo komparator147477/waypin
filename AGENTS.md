@@ -10,7 +10,7 @@ Compact guidance for OpenCode sessions working in this repo.
 
 GTK3, gdk-pixbuf-2.0, `wl-clipboard` (provides `wl-paste`/`wl-copy`).
 
-- Debian/Ubuntu: `sudo apt-get install -y libgtk-3-dev libgdk-pixbuf2.0-dev wl-clipboard xvfb`
+- Debian/Ubuntu: `sudo apt-get install -y libgtk-3-dev libgdk-pixbuf-2.0-dev wl-clipboard xvfb`
 - Arch: `sudo pacman -S gtk3 gdk-pixbuf2 wl-clipboard pkg-config`
 
 Build will fail at the `system-deps` / `pkg-config` step without the GTK3 dev packages.

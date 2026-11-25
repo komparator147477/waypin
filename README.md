@@ -35,6 +35,25 @@ hl.window_rule({
 })
 ```
 
+### Look
+
+Image previews open at the image's aspect ratio (fit to the screen, never
+upscaled) with the copy button floating in the corner, and are drawn at the
+display's scale, so screenshots stay sharp on HiDPI and fractional scaling.
+
+Preview windows use the GTK theme's background. To restyle them, for example
+with a translucent background that the compositor can blur, put CSS in
+`~/.config/waypin/style.css` (`$XDG_CONFIG_HOME/waypin/style.css`). Windows
+have the `waypin-preview` class:
+
+```css
+window.waypin-preview { background-color: rgba(18, 22, 36, 0.70); }
+window.waypin-preview scrolledwindow,
+window.waypin-preview viewport,
+window.waypin-preview textview,
+window.waypin-preview textview text { background-color: transparent; }
+```
+
 ## Background mode (Hyprland global shortcut)
 
 Build with the `global-shortcuts` feature to enable the background daemon:
