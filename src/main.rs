@@ -222,6 +222,9 @@ fn prepare_window(window: &ApplicationWindow) {
     load_user_style(&screen);
 }
 
+/// Small images open enlarged to at least this long side.
+const MIN_PREVIEW_LONG_SIDE: i32 = 400;
+
 /// Largest default window size that fits on every monitor.
 fn max_window_size() -> (i32, i32) {
     const FALLBACK: (i32, i32) = (1600, 1000);
@@ -293,14 +296,15 @@ fn build_image_window(app: &Application, img_data: &[u8], mime_type: &str) {
     overlay.add_overlay(&copy_btn);
     window.add(&overlay);
 
-    // Fit the image on screen keeping its aspect ratio; never upscale.
+    // Fit the image on screen keeping its aspect ratio; small images are
+    // enlarged to a readable size.
     let (max_w, max_h) = max_window_size();
-    let (default_w, default_h) = waypin_lib::compute_scaled_dimensions(
+    let (default_w, default_h) = waypin_lib::default_preview_size(
         orig_pixbuf.width(),
         orig_pixbuf.height(),
         max_w,
         max_h,
-        false,
+        MIN_PREVIEW_LONG_SIDE,
     );
     window.set_default_size(default_w.max(100), default_h.max(100));
     window.set_size_request(100, 100);
