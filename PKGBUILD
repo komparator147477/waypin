@@ -15,6 +15,7 @@ install="$pkgname.install"
 # directives, so it can be installed unconditionally.
 optdepends=(
   'hyprland: for the global-shortcut background daemon'
+  'xclip: for X11 sessions'
   'systemd: for the background daemon service'
   'xdg-desktop-portal-hyprland: for Hyprland GlobalShortcuts portal support'
 )

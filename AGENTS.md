@@ -4,13 +4,13 @@ Compact guidance for OpenCode sessions working in this repo.
 
 ## Project
 
-`waypin` — a GTK3 clipboard viewer for Wayland/X11 written in Rust. Reads the clipboard via `wl-paste` and writes via `wl-copy` (from `wl-clipboard`), then shows text or image in a GTK dialog. Package has both a binary (`src/main.rs` → `waypin`) and a library (`src/lib.rs` → `waypin_lib`) that holds testable logic.
+`waypin` — a GTK3 clipboard viewer for Wayland/X11 written in Rust. Reads the clipboard via `wl-paste` and writes via `wl-copy` (from `wl-clipboard`), or via `xclip` in an X11 session (`ClipboardBackend` in `src/lib.rs`), then shows text or image in a GTK dialog. Package has both a binary (`src/main.rs` → `waypin`) and a library (`src/lib.rs` → `waypin_lib`) that holds testable logic.
 
 ## System dependencies (required at build and runtime)
 
 GTK3, gdk-pixbuf-2.0, `wl-clipboard` (provides `wl-paste`/`wl-copy`).
 
-- Debian/Ubuntu: `sudo apt-get install -y libgtk-3-dev libgdk-pixbuf-2.0-dev wl-clipboard xvfb`
+- Debian/Ubuntu: `sudo apt-get install -y libgtk-3-dev libgdk-pixbuf-2.0-dev wl-clipboard xclip xvfb`
 - Arch: `sudo pacman -S gtk3 gdk-pixbuf2 wl-clipboard pkg-config`
 
 Build will fail at the `system-deps` / `pkg-config` step without the GTK3 dev packages.

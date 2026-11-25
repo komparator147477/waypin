@@ -7,7 +7,7 @@ use gtk::{
 };
 use waypin_lib::{
     copy_image_to_clipboard, copy_text_to_clipboard, detect_clipboard_content_type,
-    get_image_format_from_types, run_command, ClipboardContentType,
+    get_image_format_from_types, run_command, ClipboardBackend, ClipboardContentType,
 };
 
 #[cfg(feature = "global-shortcuts")]
@@ -66,7 +66,19 @@ enum ClipboardContent {
 
 /// Reads supported clipboard content without requiring GTK initialization.
 fn read_clipboard() -> Option<ClipboardContent> {
-    let types_raw = run_command(&["wl-paste", "--list-types"]).unwrap_or_default();
+    let backend = ClipboardBackend::detect();
+    let list_types = backend.list_types_args();
+    let Some(types_raw) = run_command(&list_types) else {
+        if !program_exists(list_types[0]) {
+            eprintln!(
+                "waypin needs {} to read the clipboard, but {} is not installed.",
+                backend.tool(),
+                list_types[0]
+            );
+        }
+        eprintln!("Could not retrieve clipboard types or clipboard is empty.");
+        return None;
+    };
     if types_raw.is_empty() {
         eprintln!("Could not retrieve clipboard types or clipboard is empty.");
         return None;
@@ -84,18 +96,21 @@ fn read_clipboard() -> Option<ClipboardContent> {
         ClipboardContentType::Image => {
             let mime_type = get_image_format_from_types(&types)
                 .expect("image clipboard content must have a supported MIME type");
-            let image_data = run_command(&["wl-paste", "--type", mime_type]).unwrap_or_default();
+            let image_data = run_command(&backend.read_args(Some(mime_type))).unwrap_or_default();
             if image_data.is_empty() {
-                eprintln!("No supported image found in clipboard or wl-paste failed.");
+                eprintln!(
+                    "No supported image found in clipboard or {} failed.",
+                    list_types[0]
+                );
                 None
             } else {
                 Some(ClipboardContent::Image(image_data, mime_type))
             }
         }
         ClipboardContentType::Text => {
-            let text = run_command(&["wl-paste", "--no-newline"]).unwrap_or_default();
+            let text = run_command(&backend.read_args(None)).unwrap_or_default();
             if text.is_empty() {
-                eprintln!("No text found in clipboard or wl-paste failed.");
+                eprintln!("No text found in clipboard or {} failed.", list_types[0]);
                 None
             } else {
                 Some(ClipboardContent::Text(
@@ -104,6 +119,12 @@ fn read_clipboard() -> Option<ClipboardContent> {
             }
         }
     }
+}
+
+/// Whether `program` is found in `PATH`.
+fn program_exists(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|path| std::env::split_paths(&path).any(|dir| dir.join(program).is_file()))
 }
 
 fn show_clipboard_content(app: &Application, content: &ClipboardContent) {

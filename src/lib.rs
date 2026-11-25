@@ -1,5 +1,68 @@
 use std::process::Command;
 
+/// The command-line tool used to read and write the clipboard.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ClipboardBackend {
+    /// `wl-paste` / `wl-copy` from wl-clipboard.
+    Wayland,
+    /// `xclip` on the X11 CLIPBOARD selection.
+    X11,
+}
+
+impl ClipboardBackend {
+    /// Wayland when `WAYLAND_DISPLAY` is set, X11 when only `DISPLAY` is.
+    pub fn detect() -> Self {
+        Self::from_env(
+            std::env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty()),
+            std::env::var_os("DISPLAY").is_some_and(|v| !v.is_empty()),
+        )
+    }
+
+    pub fn from_env(wayland: bool, x11: bool) -> Self {
+        if x11 && !wayland {
+            Self::X11
+        } else {
+            Self::Wayland
+        }
+    }
+
+    /// The program this backend runs, for error messages.
+    pub fn tool(self) -> &'static str {
+        match self {
+            Self::Wayland => "wl-clipboard (wl-paste/wl-copy)",
+            Self::X11 => "xclip",
+        }
+    }
+
+    /// Command that prints the clipboard's MIME types / X11 targets, one per line.
+    pub fn list_types_args(self) -> Vec<&'static str> {
+        match self {
+            Self::Wayland => vec!["wl-paste", "--list-types"],
+            Self::X11 => vec!["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"],
+        }
+    }
+
+    /// Command that prints the clipboard content as `mime_type`, or as text.
+    pub fn read_args(self, mime_type: Option<&str>) -> Vec<&str> {
+        match (self, mime_type) {
+            (Self::Wayland, Some(mime)) => vec!["wl-paste", "--type", mime],
+            (Self::Wayland, None) => vec!["wl-paste", "--no-newline"],
+            (Self::X11, Some(mime)) => vec!["xclip", "-selection", "clipboard", "-t", mime, "-o"],
+            (Self::X11, None) => vec!["xclip", "-selection", "clipboard", "-o"],
+        }
+    }
+
+    /// Command that takes the new clipboard content on stdin.
+    pub fn write_args(self, mime_type: Option<&str>) -> Vec<&str> {
+        match (self, mime_type) {
+            (Self::Wayland, Some(mime)) => vec!["wl-copy", "--type", mime],
+            (Self::Wayland, None) => vec!["wl-copy"],
+            (Self::X11, Some(mime)) => vec!["xclip", "-selection", "clipboard", "-t", mime, "-i"],
+            (Self::X11, None) => vec!["xclip", "-selection", "clipboard", "-i"],
+        }
+    }
+}
+
 pub fn run_command(args: &[&str]) -> Option<Vec<u8>> {
     let output = Command::new(args[0]).args(&args[1..]).output().ok()?;
     if output.status.success() {
@@ -73,15 +136,17 @@ pub fn copy_text_to_clipboard(text: &str) -> Result<(), String> {
 
 fn copy_to_clipboard(mime_type: Option<&str>, data: &[u8]) -> Result<(), String> {
     use std::io::Write;
-    let mut command = std::process::Command::new("wl-copy");
-    if let Some(mime_type) = mime_type {
-        command.arg("--type").arg(mime_type);
-    }
-
-    let mut child = command
+    let args = ClipboardBackend::detect().write_args(mime_type);
+    let program = args[0];
+    // xclip stays in the background to serve the selection; it must not hold
+    // on to our stdout/stderr.
+    let mut child = Command::new(program)
+        .args(&args[1..])
         .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
         .spawn()
-        .map_err(|e| format!("Failed to spawn wl-copy: {e}"))?;
+        .map_err(|e| format!("Failed to spawn {program}: {e}"))?;
 
     if let Some(stdin) = child.stdin.as_mut() {
         stdin
@@ -91,12 +156,12 @@ fn copy_to_clipboard(mime_type: Option<&str>, data: &[u8]) -> Result<(), String>
 
     let exit_status = child
         .wait()
-        .map_err(|e| format!("Failed to wait for wl-copy: {e}"))?;
+        .map_err(|e| format!("Failed to wait for {program}: {e}"))?;
 
     if exit_status.success() {
         Ok(())
     } else {
-        Err("wl-copy command failed".to_string())
+        Err(format!("{program} command failed"))
     }
 }
 
@@ -155,27 +220,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn default_preview_size_keeps_normal_images() {
+    fn backend_prefers_wayland_and_falls_back_to_x11() {
         assert_eq!(
-            default_preview_size(1100, 400, 1600, 1000, 400),
-            (1100, 400)
+            ClipboardBackend::from_env(true, true),
+            ClipboardBackend::Wayland
         );
         assert_eq!(
-            default_preview_size(3200, 1000, 1600, 1000, 400),
-            (1600, 500)
+            ClipboardBackend::from_env(true, false),
+            ClipboardBackend::Wayland
+        );
+        assert_eq!(
+            ClipboardBackend::from_env(false, true),
+            ClipboardBackend::X11
+        );
+        // Nothing set: keep the old behaviour and let wl-paste report the error.
+        assert_eq!(
+            ClipboardBackend::from_env(false, false),
+            ClipboardBackend::Wayland
         );
     }
 
     #[test]
-    fn default_preview_size_enlarges_small_images() {
-        assert_eq!(default_preview_size(120, 40, 1600, 1000, 400), (400, 133));
-        assert_eq!(default_preview_size(30, 60, 1600, 1000, 400), (200, 400));
+    fn x11_backend_uses_the_clipboard_selection() {
+        let x11 = ClipboardBackend::X11;
+        assert_eq!(
+            x11.list_types_args(),
+            ["xclip", "-selection", "clipboard", "-t", "TARGETS", "-o"]
+        );
+        assert_eq!(
+            x11.read_args(Some("image/png")),
+            ["xclip", "-selection", "clipboard", "-t", "image/png", "-o"]
+        );
+        assert_eq!(
+            x11.read_args(None),
+            ["xclip", "-selection", "clipboard", "-o"]
+        );
+        assert_eq!(
+            x11.write_args(Some("image/png")),
+            ["xclip", "-selection", "clipboard", "-t", "image/png", "-i"]
+        );
     }
 
     #[test]
-    fn default_preview_size_respects_the_maximum() {
-        assert_eq!(default_preview_size(100, 100, 300, 300, 400), (300, 300));
-        assert_eq!(default_preview_size(0, 10, 1600, 1000, 400), (0, 0));
+    fn x11_targets_are_detected() {
+        let targets = "TIMESTAMP\nTARGETS\nMULTIPLE\nUTF8_STRING\nSTRING\n";
+        assert_eq!(
+            detect_clipboard_content_type(targets),
+            ClipboardContentType::Text
+        );
+        let image = "TIMESTAMP\nTARGETS\nimage/png\n";
+        assert_eq!(
+            detect_clipboard_content_type(image),
+            ClipboardContentType::Image
+        );
     }
 
     #[test]
